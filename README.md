@@ -9,3 +9,4 @@ Her ligger vedlagt alle filene og vedleggene som bble for store til å linke dir
 - Prosjekt02 - Filtrering
 - Prosjekt03 - Numerisk derivasjon
 - Prosjekt04 - Manuell kjøring
+- Prosjekt05 - Temperatur-sensor
