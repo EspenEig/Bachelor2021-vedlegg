@@ -3,8 +3,8 @@ Her ligger vedlagt alle filene og vedleggene som bble for store til å linke dir
 
 
 - Prosjektbeskrivelse.pdf - Denne beskriver alle prosjektene i MatLab, og brukes til å gi oss en forklaring på prosjektene. 
-- Prosjekt0X - med bruk av Lister (Besluttet til å bli brukt i aalle de andre prosjektene)
-- Prosjekt0X - med bruk av Dictionary
+- Prosjekt0X - med bruk av Lister (Besluttet til å bli brukt i alle de andre prosjektene)
+- Prosjekt0XDict - med bruk av Dictionary
 - Prosjekt01 - Numerisk Integrasjon
 - Prosjekt02 - Filtrering
 - Prosjekt03 - Numerisk derivasjon
