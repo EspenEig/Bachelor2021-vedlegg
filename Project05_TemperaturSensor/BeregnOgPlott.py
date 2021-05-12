@@ -8,8 +8,8 @@ import numpy as np
 
 # Set online flag, ip address and filename.
 online = True
-#EV3_IP = "192.168.2.2"
-EV3_IP = "168.254.119.2"
+EV3_IP = "192.168.2.2"
+#EV3_IP = "168.254.119.2"
 filename = "measurements.txt"
 
 # Initialize lists.
@@ -80,12 +80,14 @@ def live(i):
         data = sock.recv(1024)
     except:
         print("Lost connection to EV3")
-        livePlot.event_source.stop()
+        #livePlot.event_source.stop()
         return
     # If the data recieved is the end signal, freeze plot.
+    print(data)
     if data == b"end":
+        print(data)
         print("Recieved end signal")
-        livePlot.event_source.stop()
+        #livePlot.event_source.stop()
         return
 
     # If data is not the end signal, decode it.
@@ -93,14 +95,16 @@ def live(i):
     try:
         data = json.loads(data)
     except:
+        print("xx")
+        print(data)
         print("Lost connection to EV3")
-        livePlot.event_source.stop()
+        #livePlot.event_source.stop()
         return
 
     # Append the recieved data to the lists.
-    Temperatur.append(data["temperatur"])
+    Temperatur.append(data["tmp"])
     time.append(data["time"])
-    MSR.append(data["msr"])
+    MSR.append(data["ntc_msr"])
     
     
     # denne funksjonen tar seg av flow og volume
@@ -157,3 +161,7 @@ if online:
 else:
     # If offline, plot from file defined by filename.
     offline(filename)
+
+
+
+

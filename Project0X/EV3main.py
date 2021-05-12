@@ -15,63 +15,61 @@ import struct
 import socket
 import json
 import _thread
-import uselect
-from time import perf_counter
-from time import sleep
+from time import perf_counter, sleep
 
 # Er du koblet til NXT eller ikke?
 online = True
 
-
-
-# variabel som settes lik True når styrestikken trykkes
+# joyMainSwitch settes lik True når styrestikken trykkes
 # inn, og programmet vil da avslutte
 joyMainSwitch = False
 
-#joyForwardInstance = 0
-#joySideInstance = 0
+joyForwardInstance = 0
+joySideInstance = 0
+
 
 def main():
     try:
-        #Med flere sensorer må man legge det til her
-        #robot, myColorSensor, out_file, motorB, motorC = Initialize()
-        robot, myColorSensor = Initialize(online)
+        # Med flere sensorer må man legge det til her
+        # robot, myColorSensor, out_file, motorB, motorC = Initialize()
+        robot, myColorSensor, motorA = Initialize(online)
 
         print("Initialized.")
 
-        zeroTimeInit, time, light = GetFirstMeasurements(robot, myColorSensor)
+        zeroTimeInit, time, light, powerA, joyForward, joySide = \
+            GetFirstMeasurements(myColorSensor)
 
         print("First measurements acquired.")
-        # initialiser diskret tellevariabel
-        k = 0
 
         # Read joystick
-        _thread.start_new_thread(JoyMainSwitch, [robot])
+        _thread.start_new_thread(getJoystickValues, [robot])
 
         print("Ready.")
 
         while True:
             if joyMainSwitch:
                 break
-
-            # inkrementer den diskrete tellevariabelen
-            k+=1
-            GetNewMeasurement(zeroTimeInit, time, light, myColorSensor)
-            print("New measurements acquired.")
-            # CalculateAndSetMotorPower(motorA, light)
-            SendData(robot, time, light, online)
-            if online:
-                print("Data sent to computer and measurements file.")
-            else:
-                print("Data sent to measurements file.")
+            GetNewMeasurement(zeroTimeInit, time, light, myColorSensor,
+                              joyForward, joySide)
+            CalculateAndSetMotorPower(motorA, powerA, light,
+                                      joyForward, joySide)
+            SendData(robot, online, time, light)
 
             # Hvis du får socket timeouts, fjern kommentar foran sleep(1)
-            # og "from time import sleep" på linje 18
             # sleep(1)
     except Exception as e:
-        print(e)
+        print("main:", e)
     finally:
         CloseMotorsAndSensors(robot, online)
+
+        # Det er 3 forskjellige måter å stoppe motorene på:
+        # stop() stopper motorpådraget, men bremser ikke.
+        # brake() stopper motorpådraget, og bruker strømmen.
+        # generert av rotasjonen til å bremse.
+        # hold stopper motorpådraget og låser rotasjonsvinkelen.
+        motorA.stop()
+        # motorB.brake()
+        # motorC.hold()
 
 
 def Initialize(online):
@@ -89,7 +87,7 @@ def Initialize(online):
     for live kommunikasjon til PC.
     """
 
-    # robot inneholder all info om robotten
+    # robot inneholder all info om roboten
     robot = {}
 
     ev3 = EV3Brick()
@@ -98,6 +96,12 @@ def Initialize(online):
     # joystick inneholder all info om joysticken.
     joystick = {}
     joystick["id"] = IdentifyJoystick()
+    joyScale = 0
+    if joystick["id"] == "logitech":
+        joyScale = 1024
+    elif joystick["id"] == "dacota":
+        joyScale = 255
+    joystick["scale"] = joyScale
     joystick["FORMAT"] = 'llHHI'
     joystick["EVENT_SIZE"] = struct.calcsize(joystick["FORMAT"])
     try:
@@ -140,12 +144,11 @@ def Initialize(online):
     # Pass på at sensoren er koblet til den porten som er gitt som parameter!
     myColorSensor = ColorSensor(Port.S1)
 
-    #myTouchSensor = TouchSensor(Port.S2)
+    # myTouchSensor = TouchSensor(Port.S2)
 
-    #myUltrasonicSensor = UltrasonicSensor(Port.S3)
+    # myUltrasonicSensor = UltrasonicSensor(Port.S3)
 
-    #myGyroSensor = GyroSensor(Port.S4)
-
+    # myGyroSensor = GyroSensor(Port.S4)
 
     # Initialiserer motorer.
 
@@ -157,27 +160,27 @@ def Initialize(online):
     # https://pybricks.github.io/ev3-micropython/ev3devices.html
     # Her er det viktig å kommentere vekk de motorene som ikke skal brukes.
     # Pass på at motoren er koblet til den porten som er gitt som parameter!
-    #motorA = Motor(Port.A)
-    #motorA.reset_angle(0)
+    motorA = Motor(Port.A)
+    motorA.reset_angle(0)
 
-    #motorB = Motor(Port.B)
-    #motorB.reset_angle(0)
+    # motorB = Motor(Port.B)
+    # motorB.reset_angle(0)
 
-    #motorC = Motor(Port.C)
-    #motorC.reset_angle(0)
+    # motorC = Motor(Port.C)
+    # motorC.reset_angle(0)
 
-    #motorD = Motor(Port.D)
-    #motorD.reset_angle(0)
+    # motorD = Motor(Port.D)
+    # motorD.reset_angle(0)
 
-    return robot, myColorSensor
+    return robot, myColorSensor, motorA
 
 
-def GetFirstMeasurements(robot, myColorSensor):
+def GetFirstMeasurements(myColorSensor):
     """
     Får inn første måling fra sensorer og motorer.
 
     Parametre:
-    robot - robot dictionaryen 
+    robot - robot dictionaryen
     myColorSensor - Fargesensoren
 
     Andre sensorer og motorer må legges til som parametre
@@ -195,44 +198,44 @@ def GetFirstMeasurements(robot, myColorSensor):
     # Alternative funksjoner til sensorene kan finnes på
     # https://docs.pybricks.com/en/latest/ev3devices.html
 
-
     light = [myColorSensor.reflection()]
     # ambient = [myColorSensor.ambient()]
 
-    #touch = [myTouchSensor.pressed()]
+    # touch = [myTouchSensor.pressed()]
 
-    #distance = [myUltrasonicSensor.distance()]
+    # distance = [myUltrasonicSensor.distance()]
 
     # myGyroSensor.reset_angle(0)
     # gyroAngle = [myGyroSensor.angle()]
 
     # gyroRate = [myGyroSensor.speed()]
 
-    
-    
-
-
     # Motorer
     # Kommenter bort de som ikke skal brukes!
 
-    #motorAspeed = [motorA.speed()]
-    #motorAangle = [motorA.angle()]
+    powerA = [0]
+    # motorAangle = [motorA.angle()]
 
-    # motorBspeed = [motorB.speed()]
+    # powerB = [0]
     # motorBangle= [motorB.angle()]
 
-    # motorCspeed = [motorC.speed()]
+    # motorC = [0]
     # motorCangle= [motorC.angle()]
 
-    # motorDspeed = [motorD.speed()]
+    # powerD = [0]
     # motorDangle= [motorD.angle()]
 
+    # Joystick
+    joyForward = [joyForwardInstance]
+    joySide = [joySideInstance]
+
     # Verdiene er også nødt til å bli lagt ut i return linjen under
-    return zeroTimeInit, time, light
+    return zeroTimeInit, time, light, powerA, joyForward, joySide
 
 
 # Aktive sensorer må bli lagt inn som input
-def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
+def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor,
+                      joyForward, joySide):
     """
     Får inn nye målinger fra sensorer og motorer. Denne blir kalt i while-løkka
     i main() funksjonen.
@@ -241,7 +244,8 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     zeroTimeInit - nulltida
     time - liste med tider
     light - liste med målte lysverdier fra lyssensoren
-    myColorSensoren - lyssensoren, for å få inn nye lysverdier
+    myColorSensor - lyssensoren, for å få inn nye lysverdier
+    joyForward, joySide - liste med verdier fra styrestikken
 
     Andre sensorer og motorer må legges til som parametre
     hvis de skal brukes.
@@ -250,8 +254,7 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     time.append(perf_counter() - zeroTimeInit)
     light.append(myColorSensor.reflection())
 
-
-        # Her legges de målte verdiene til.
+    # Her legges de målte verdiene til.
     # Husk å kommenter vekk alle sensorer som ikke blir brukt!
 
     # Legg til den målte lysverdien
@@ -264,7 +267,7 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     # ambient.append(myColorSensor.ambient())
 
     # Legg til den målte bryterverdien
-    #touch.append(myTouchSensor.pressed())
+    # touch.append(myTouchSensor.pressed())
 
     # Legg til den målte distanseverdien til ultrasonicsensoren
     # distance.append(myUltrasonicSensor.distance())
@@ -274,7 +277,6 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     # Legg til den målte farten (angular velocity) til gyrosensoren
     # gyroRate.append(myGyroSensor.speed())
 
-
     # Legg til den målte akkumulerte vinkelverdien til motor A
     # motor A tilsvarer altså motoren som er festet til port A
     # motorAangle.append(motorA.angle())
@@ -282,13 +284,11 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     # Legg til den målte farten (angular velocity) til motor A
     # motorAspeed.append(motorA.speed())
 
-
     # Legg til en målte akkumulerte vinkelverdien til motor B
     # motorBangle.append(motorB.angle())
 
     # Legg til den målte farten (angular velocity) til motor B
     # motorBspeed.append(motorB.speed())
-
 
     # Legg til en målte akkumulerte vinkelverdien til motor C
     # motorCangle.append(motorC.angle())
@@ -296,21 +296,26 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     # Legg til den målte farten (angular velocity) til motor C
     # motorCspeed.append(motorC.speed())
 
-
     # Legg til en målte akkumulerte vinkelverdien til motor D
     # motorDangle.append(motorD.angle())
 
     # Legg til den målte farten (angular velocity) til motor D
     # motorDspeed.append(motorD.speed())
 
+    # Legg til den nyeste joystick posisjonen
+    joyForward.append(joyForwardInstance)
+    joySide.append(joySideInstance)
 
-def CalculateAndSetMotorPower(motorA, lys):
+
+def CalculateAndSetMotorPower(motorA, powerA, light, joyForward, joySide):
     """
     Beregner og setter pådrag til motorene som brukes.
 
     Parametre:
     motorA - Motor A
-    lys - lysliste
+    powerA - motorpådragliste for motor A
+    light - lysliste
+    joyForward, joySide - styrestikklister
 
     Andre motorer og verdier som brukes for å beregne pådrag
     må legges til som parametre.
@@ -321,33 +326,33 @@ def CalculateAndSetMotorPower(motorA, lys):
     b = 1
 
     # Her brukes siste lysmåling for å beregne motorpådrag.
-    lysmaaling = lys[-1]
+    lysmaaling = light[-1]
 
     # pådraget
-    motorPaadragA = lysmaaling*a*b
-    # motorPaadragB = lysmaaling*a
-    # motorPaadragC = lysmaaling*a
-    # motorPaadragD = lysmaaling*a
+    powerA.append(lysmaaling + a * joyForward[-1] - b * joySide[-1])
+    # powerB = lysmaaling*a
+    # powerC = lysmaaling*a
+    # powerD = lysmaaling*a
 
     # Sett hastigen på motorene.
-    motorA.run(motorPaadragA)
-    #motorB.run(motorPaadragB)
-    #motorC.run(motorPaadragC)
-    #motorD.run(motorPaadragD)
+    motorA.run(powerA[-1])
+    # motorB.run(powerB[-1])
+    # motorC.run(powerC[-1])
+    # motorD.run(powerD[-1])
 
 
-def SendData(robot, time, light, online):
+def SendData(robot, online, time, light):
     """
     Sender data fra EV3 til datamaskin, lagrer også målte og beregnede
     verdier på EV3en i målefila som ble definert i Initialize().
 
     Parametre:
     robot - robot dictionaryen
-    time - tidliste
-    light - lysliste
     online - bool; om det kjøres i online modus eller ikke.
     Hvis det ikke kjøres i online modus vil ikke roboten
     prøve å sende data til PCen.
+    time - tidliste
+    light - lysliste
 
     Andre målte og beregnede verdier som skal
     lagres på EV3en og skal sendes til
@@ -355,32 +360,25 @@ def SendData(robot, time, light, online):
     """
 
     # for json må alle dataene pakkes inn i en dictionary
-    # hvor hver kjøring tømmes 'data' og 'dataString'
+    # for hver kjøring tømmes 'dataString'
     data = {}
     dataString = ""
-
-    # hver verdi i dictionaryen må referere til en tuple
-    data["time"] = (time[-1])
-    data["light"] = (light[-1])
 
     # for å skrive til measurements.txt
     dataString += str(time[-1]) + ","
     dataString += str(light[-1]) + "\n"
 
-    # Trenger ikke å forandre på noe fra linje 227 til linje 229.
+    # hver verdi i dictionaryen må referere til en tuple
+    data["time"] = (time[-1])
+    data["light"] = (light[-1])
+
     # Skriv dataString til fil
-    print("Writing to measurements.txt")
     robot["outfile"].write(dataString)
 
     # Send data til PC
     if online:
         msg = json.dumps(data)
-        print("Sending data from EV3 to computer.")
-        robot["connection"].send(msg)
-        
-        # Vent til PC annerkjenner data før fortsettelse
-        if not robot["connection"].recv(3) == b"ack":
-            print("No data ack")
+        robot["connection"].send(bytes(msg, "utf-b") + b"?")
 
 
 def CloseMotorsAndSensors(robot, online):
@@ -426,20 +424,44 @@ def IdentifyJoystick():
         except:
             pass
 
-def JoyMainSwitch(robot):
-    global joyMainSwitch
+
+def scale(value, src, dst):
+    return ((float(value - src[0])
+            / (src[1] - src[0])) * (dst[1] - dst[0])
+            + dst[0])
+
+
+def getJoystickValues(robot):
+    global joyMainSwitch, joyForwardInstance, joySideInstance
     print("Thread started")
+
+    if robot["joystick"]["in_file"] is None:
+        return
     while True:
-        if robot["joystick"]["in_file"] is not None:
-            event = robot["joystick"]["in_file"].read(
-                robot["joystick"]["EVENT_SIZE"])
-            (tv_sec, tv_usec, ev_type, code, value) = struct.unpack(
-                robot["joystick"]["FORMAT"], event)
-            if ev_type == 1:
-                print("Joystick signal received, stopping program.")
-                robot["brick"].speaker.beep()
-                joyMainSwitch = True
-                return
+        try:
+            (_, _, ev_type, code, value) = struct.unpack(
+                robot["joystick"]["FORMAT"],
+                robot["joystick"]["in_file"].read(
+                    robot["joystick"]["EVENT_SIZE"]))
+        except Exception as e:
+            print("thread:", e)
+        if ev_type == 1:
+            print("Joystick signal received, stopping program.")
+            robot["brick"].speaker.beep()
+            joyMainSwitch = True
+            return
+        elif ev_type == 3:
+            if code == 0:
+                joySideInstance = scale(
+                    value,
+                    (robot["joystick"]["scale"], 0),
+                    (50, -50))
+            elif code == 1:
+                joyForwardInstance = scale(
+                    value,
+                    (0, robot["joystick"]["scale"]),
+                    (100, -100))
+
 
 if __name__ == '__main__':
     main()

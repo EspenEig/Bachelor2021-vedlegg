@@ -16,20 +16,14 @@ import socket
 import json
 import _thread
 import uselect
-from time import perf_counter
-from time import sleep
+from time import perf_counter, sleep
 
 # Er du koblet til NXT eller ikke?
-online = True
+online = False
 
 joyMainSwitch = False
 joyForwardInstance = 0
 joySideInstance = 0
-
-
-# Testing
-runTime = 0
-msgCount = 0
 
 
 def main():
@@ -56,7 +50,7 @@ def main():
             CalculateAndSetMotorPower(motorB, powerB, motorC, powerC,
                                       joyForward, joySide)
 
-            SendData(robot, time, light, out_file, joyForward, joySide,
+            SendData(robot, time, light, out_file,
                      powerB, powerC)
             # print("Data sent to computer.")
 
@@ -190,6 +184,10 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor,
     time.append(perf_counter() - zeroTimeInit)
     light.append(myColorSensor.reflection())
 
+    if light[-1] > 70:
+        global joyMainSwitch
+        joyMainSwitch = True
+
     joyForward.append(joyForwardInstance)
     joySide.append(joySideInstance)
 
@@ -215,13 +213,12 @@ def CalculateAndSetMotorPower(motorB, powerB, motorC, powerC,
     powerB.append(joyForward[-1] * b + joySide[-1] * a)
     powerC.append(joyForward[-1] * b - joySide[-1] * a)
 
-    # Sett hastigen på motorene.
+    # Sett hastigheten på motorene.
     motorB.dc(powerB[-1])
     motorC.dc(powerC[-1])
 
 
-def SendData(robot, time, light, out_file, joyForward,
-             joySide, powerB, powerC):
+def SendData(robot, time, light, out_file, powerB, powerC):
     """
     Sender data fra EV3 til datamaskin, lagrer også målte og beregnede
     verdier på EV3en i "out_file" som ble definert i Initialize().
@@ -249,8 +246,6 @@ def SendData(robot, time, light, out_file, joyForward,
     # for å skrive til measurements.txt
     dataString += str(time[-1]) + ","
     dataString += str(light[-1]) + ","
-    dataString += str(joyForward[-1]) + ","
-    dataString += str(joySide[-1]) + ","
     dataString += str(powerB[-1]) + ","
     dataString += str(powerC[-1]) + "\n"
 
@@ -269,30 +264,12 @@ def SendData(robot, time, light, out_file, joyForward,
         # hver verdi i dictionaryen må referere til en tuple
         data["time"] = (time[-1])
         data["light"] = (light[-1])
-        data["joyForward"] = (joyForward[-1])
-        data["joySide"] = (joySide[-1])
         data["powerB"] = (powerB[-1])
         data["powerC"] = (powerC[-1])
 
-        print("Run time: ", perf_counter() - runTime)
-        dumpTime = perf_counter()
         msg = json.dumps(data)
-        print("Dump time: ", perf_counter() - dumpTime)
         # print("Sending data from EV3 to computer.")
-        sendTime = perf_counter()
         robot["connection"].send(bytes(msg, "utf-8") + b"?")
-
-        msgCount += 1
-        print("Send time: ", perf_counter() - sendTime)
-
-        # ackTime = perf_counter()
-        # # Vent til PC annerkjenner data før fortsettelse
-        # if not robot["connection"].recv(3) == b"ack":
-        # print(robot["connection"].recv(3))
-        # print("Ack time: ", perf_counter() - ackTime)
-        print("Total send time: ", perf_counter() - dumpTime)
-        print("\n")
-        runTime = perf_counter()
 
 
 def CloseMotorsAndSensors(robot, out_file, motorB, motorC):
@@ -317,50 +294,8 @@ def CloseMotorsAndSensors(robot, out_file, motorB, motorC):
         robot["connection"].close()
         robot["sock"].close()
 
-        print("Message count: ", msgCount)
-
     motorB.brake()
     motorC.brake()
-
-
-def scale(value, src, dst):
-    return ((float(value - src[0])
-            / (src[1] - src[0])) * (dst[1] - dst[0])
-            + dst[0])
-
-
-def getJoystickValues(robot):
-    global joyMainSwitch, joyForwardInstance, joySideInstance
-    print("Thread started")
-
-    event_poll = uselect.poll()
-    event_poll.register(robot["joystick"]["in_file"], uselect.POLLIN)
-    while True:
-        events = event_poll.poll(0)
-        if len(events) > 0 and events[0][1] & uselect.POLLIN:
-            try:
-                (_, _, event_type, code, value) = struct.unpack(
-                    robot["joystick"]["FORMAT"],
-                    robot["joystick"]["in_file"].read(
-                        robot["joystick"]["EVENT_SIZE"]))
-            except Exception as e:
-                print(e)
-            if event_type == 1:
-                print("Joystick signal received, stopping program.")
-                robot["brick"].speaker.beep()
-                joyMainSwitch = True
-                return
-            elif event_type == 3:
-                if code == 0:
-                    joySideInstance = scale(
-                        value,
-                        (robot["joystick"]["scale"], 0),
-                        (50, -50))
-                elif code == 1:
-                    joyForwardInstance = scale(
-                        value,
-                        (0, robot["joystick"]["scale"]),
-                        (100, -100))
 
 
 def identifyJoystick():
@@ -384,6 +319,49 @@ def identifyJoystick():
             break
         except:
             pass
+
+
+def scale(value, src, dst):
+    return ((float(value - src[0])
+            / (src[1] - src[0])) * (dst[1] - dst[0])
+            + dst[0])
+
+
+def getJoystickValues(robot):
+    global joyMainSwitch, joyForwardInstance, joySideInstance
+    print("Thread started")
+
+    event_poll = uselect.poll()
+    if robot["joystick"]["in_file"] is not None:
+        event_poll.register(robot["joystick"]["in_file"], uselect.POLLIN)
+    else:
+        return
+    while True:
+        events = event_poll.poll(0)
+        if len(events) > 0 and events[0][1] & uselect.POLLIN:
+            try:
+                (_, _, ev_type, code, value) = struct.unpack(
+                    robot["joystick"]["FORMAT"],
+                    robot["joystick"]["in_file"].read(
+                        robot["joystick"]["EVENT_SIZE"]))
+            except Exception as e:
+                print(e)
+            if ev_type == 1:
+                print("Joystick signal received, stopping program.")
+                robot["brick"].speaker.beep()
+                joyMainSwitch = True
+                return
+            elif ev_type == 3:
+                if code == 0:
+                    joySideInstance = scale(
+                        value,
+                        (robot["joystick"]["scale"], 0),
+                        (50, -50))
+                elif code == 1:
+                    joyForwardInstance = scale(
+                        value,
+                        (0, robot["joystick"]["scale"]),
+                        (100, -100))
 
 
 if __name__ == '__main__':

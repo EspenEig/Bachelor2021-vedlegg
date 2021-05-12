@@ -7,12 +7,7 @@
 # Følgende motorer brukes:
 #
 # ------------------------------------------------
-
-from ev3dev2.port import LegoPort
-from ev3dev2.sensor import INPUT_4
-from ev3dev2.sensor.lego import Sensor
-
-from TempSensor import ntc
+from ntc_sensor_micropython import ntc
 
 
 from pybricks.hubs import EV3Brick
@@ -29,7 +24,8 @@ from time import sleep
 # Er du koblet til NXT eller ikke?
 online = True
 
-
+tmp = [0]
+ntc_msr = [0]
 
 # variabel som settes lik True når styrestikken trykkes
 # inn, og programmet vil da avslutte
@@ -42,11 +38,11 @@ def main():
     try:
         #Med flere sensorer må man legge det til her
         #robot, myColorSensor, out_file, motorB, motorC = Initialize()
-        robot, tempSensor, ntc_sensor = Initialize(online)
+        robot, ntc_sensor = Initialize(online)
 
         print("Initialized.")
 
-        zeroTimeInit, time = GetFirstMeasurements(robot, tempSensor)
+        zeroTimeInit, time = GetFirstMeasurements(robot)
 
         print("First measurements acquired.")
         # initialiser diskret tellevariabel
@@ -73,17 +69,13 @@ def main():
 
             # inkrementer den diskrete tellevariabelen
             k+=1
-            GetNewMeasurement(zeroTimeInit, time)
+            GetNewMeasurement(zeroTimeInit, time, ntc_sensor)
             print("New measurements acquired.")
-            #Leser av sensorverdi i volt:
-            msr = ntc_sensor.value()
 
-            #Konverterer til temperatur:
-            temperatur = a.temp_C(msr)
 
 
             # CalculateAndSetMotorPower(motorA, light)
-            SendData(robot, time, temperatur, msr, online)
+            SendData(robot, time, tmp, ntc_msr, online)
             if online:
                 print("Data sent to computer and measurements file.")
             else:
@@ -161,17 +153,12 @@ def Initialize(online):
     a.maxADC(5000)
 
     #Definerer port 4 til å være analog inngang:
-    tempSensor = LegoPort(INPUT_4)
-    tempSensor.mode = 'nxt-analog'
-    tempSensor.set_device = 'nxt-analog'
+    ntc_sensor = AnalogSensor(Port.S4)
 
-        #Definerer at temperatursensoren er koblet til port 4: 
-    ntc_sensor = Sensor(INPUT_4)
-
-    return robot, tempSensor, ntc_sensor, a
+    return robot, ntc_sensor, a
 
 
-def GetFirstMeasurements(robot, tempSensor):
+def GetFirstMeasurements(robot):
     """
     Får inn første måling fra sensorer og motorer.
 
@@ -196,7 +183,7 @@ def GetFirstMeasurements(robot, tempSensor):
 
 
 # Aktive sensorer må bli lagt inn som input
-def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
+def GetNewMeasurement(zeroTimeInit, time, ntc_sensor):
     """
     Får inn nye målinger fra sensorer og motorer. Denne blir kalt i while-løkka
     i main() funksjonen.
@@ -212,14 +199,14 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     """
     # Legg til differansen mellom nulltida og perf_counter() ("nå")
     time.append(perf_counter() - zeroTimeInit)
-    light.append(myColorSensor.reflection())
+    #light.append(myColorSensor.reflection())
 
 
         # Her legges de målte verdiene til.
     # Husk å kommenter vekk alle sensorer som ikke blir brukt!
 
     # Legg til den målte lysverdien
-    light.append(myColorSensor.reflection())
+    #light.append(myColorSensor.reflection())
 
     # Legg til den målte fargeverdien
     # color.append(myColorSensor.color())
@@ -267,6 +254,9 @@ def GetNewMeasurement(zeroTimeInit, time, light, myColorSensor):
     # Legg til den målte farten (angular velocity) til motor D
     # motorDspeed.append(motorD.speed())
 
+    ntc_msr = ntc_sensor.voltage()
+    tmp = a.temp_C(ntc_msr)
+
 
 def CalculateAndSetMotorPower(motorA, lys):
     """
@@ -300,7 +290,7 @@ def CalculateAndSetMotorPower(motorA, lys):
     #motorD.run(motorPaadragD)
 
 
-def SendData(robot, time, temperatur, msr, online):
+def SendData(robot, time, tmp, ntc_msr, online):
     """
     Sender data fra EV3 til datamaskin, lagrer også målte og beregnede
     verdier på EV3en i målefila som ble definert i Initialize().
@@ -325,13 +315,14 @@ def SendData(robot, time, temperatur, msr, online):
 
     # hver verdi i dictionaryen må referere til en tuple
     data["time"] = (time[-1])
-    data["temperatur"] = (temperatur[-1])
-    data["msr"] = (msr[-1])
+    data["tmp"] = (tmp[-1])
+    data["ntc_msr"] = (ntc_msr[-1])
+    print(tmp, file=stderr)
 
     # for å skrive til measurements.txt
     dataString += str(time[-1]) + ","
-    dataString += str(temperatur[-1]) + ","
-    dataString += str(msr[-1]) + "\n"
+    dataString += str(tmp[-1]) + ","
+    dataString += str(ntc_msr[-1]) + "\n"
 
     # Trenger ikke å forandre på noe fra linje 227 til linje 229.
     # Skriv dataString til fil
@@ -340,6 +331,7 @@ def SendData(robot, time, temperatur, msr, online):
 
     # Send data til PC
     if online:
+
         msg = json.dumps(data)
         print("Sending data from EV3 to computer.")
         robot["connection"].send(msg)

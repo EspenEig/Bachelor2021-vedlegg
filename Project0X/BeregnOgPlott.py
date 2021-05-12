@@ -1,21 +1,51 @@
-# -*- coding: utf-8 -*-
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import socket
 import sys
 import json
 
+# Tmp data
+tmp = ""
+
 # Set online flag, ip address and filename.
-online = True
-EV3_IP = "192.168.2.2"
+online = False
+EV3_IP = "169.254.70.247"
 filename = "measurements.txt"
 
 # Initialize lists.
 light = []
 time = []
 ts = [0]
-flow = [0]
+flow = []
 volume = [0]
+
+# Define figure and subplots.
+fig, ax = plt.subplots(nrows=3, ncols=1, sharex=True)
+
+
+def initPlot():
+    global ax
+    ax[0].set_title('Light')
+    ax[1].set_title('Flow')
+    ax[2].set_title('Volume')
+    ax[2].set_xlabel('Time [sec]')
+
+
+def plotData():
+    ax[0].plot(time[0:-1], light[0:-1], 'b')
+
+    ax[1].plot(time[0:-1], flow[0:-1], 'b')
+
+    ax[2].plot(time[0:-1], volume[0:-1], 'b')
+
+
+def stopPlot():
+    try:
+        livePlot.event_source.stop()
+    except:
+        pass
+    # Alt som skal regnes ut når programmet stoppes legges her
+
 
 def MathCalculations():
     """
@@ -32,106 +62,89 @@ def MathCalculations():
     Andre målte og beregnede verdier må legges til som parametre
     hvis de skal bruke
     """
-    if online: # hvis online modus
-        # Flow
-        flow.append(light[-1] - light[0])
-        if len(time) > 1:
-            # ts
-            ts.append(time[-1] - time[-2])
-            # Volume - "light integrated"
-            volume.append(volume[-1] + flow[-2] * ts[-1])
 
-    else: # hvis offline modus
-        # flow
-        for lightvalue in light[1:]:
-            flow.append(lightvalue - light[0])
-        # timestep
-        for i in range(len(time)):
-            if i+1 < len(time):
-                ts.append(time[i+1] - time[i])
-        # volume:
-        for i in reversed(range(len(light))):
-            volume.append(volume[len(volume)-1] + flow[i-1] * ts[i-1])
-        volume.pop()
-
-# Define figure and subplots.
-fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1, sharex=True)
+    # Flow
+    flow.append(light[-1] - light[0])
+    if len(time) > 1:
+        # ts
+        ts.append(time[-1] - time[-2])
+        # Volume - "light integrated"
+        volume.append(volume[-1] + flow[-2] * ts[-1])
 
 
-def plotData():
-    # Clear subplots to prepare for next frame.
-    ax1.cla()
-    ax2.cla()
-    ax3.cla()
-
-    ax1.plot(time[0:-1], light[0:-1])
-    ax1.set_title('Light')
-
-    print(len(flow))
-    print(len(time))
-    # for å printe offline, bruk flow[0:-1]
-    ax2.plot(time[0:-1], flow[1:-1])
-    ax2.set_title('Flow')
-
-    ax3.plot(time[0:-1], volume[0:-1])
-    ax3.set_title('Volume')
-    ax3.set_xlabel('Time [sec]')
+def appendLists(datum):
+    if isinstance(datum, dict):
+        light.append(datum["light"])
+        time.append(datum["time"])
+    else:
+        time.append(float(datum[0]))
+        light.append(int(datum[1]))
 
 
-def live(i):
-    # Recieve data from EV3.
-    try:
-        data = sock.recv(1024)
-    except:
-        print("Lost connection to EV3")
-        livePlot.event_source.stop()
-        return
-
-
-    # If the data recieved is the end signal, freeze plot.
-    if data == b"end":
-        print("Recieved end signal")
-        livePlot.event_source.stop()
-        return
-
-    # If data is not the end signal, decode it.
-    print(data)
-    try:
-        data = json.loads(data)
-    except:
-        print("Lost connection to EV3")
-        livePlot.event_source.stop()
-        return
-    # Append the recieved data to the lists.
-    light.append(data["light"])
-    time.append(data["time"])
-    # denne funksjonen tar seg av flow og volume
-    MathCalculations()
-
-    # Ensure no more data is sent before this set is handled
-    sock.send(b"ack")
-
-    # Plot the data in the lists.
-    plotData()
+# Ikke endre under her
 
 
 def offline(filename):
     # Read from file row by row and append data to lists.
     with open(filename) as f:
         for row in f:
-            row = row.split(",")
-            time.append(float(row[0]))
-            light.append(int(row[1]))
-
-    MathCalculations()
+            datum = row.split(",")
+            appendLists(datum)
+            MathCalculations()
 
     # Plot data in lists.
+    initPlot()
     plotData()
+
+    stopPlot()
     # Set plot layout and show plot.
-   
-    fig.set_tight_layout(True)# mac
-    
-    plt.show()
+
+    fig.set_tight_layout(True)  # mac
+
+
+def live(i):
+    global tmp
+    # Recieve data from EV3.
+    try:
+        data = sock.recv(1024)
+    except Exception as e:
+        print(e)
+        print("Lost connection to EV3")
+        stopPlot()
+        return
+
+    try:
+        data = data.split(b"?")
+        # Reconstruct split data
+        if tmp != "":
+            data[0] = tmp + data[0]
+            tmp = ""
+
+        for datum in data:
+            if datum == b'':
+                continue
+            # If the data recieved is the end signal, freeze plot.
+            elif datum == b"end":
+                print("Recieved end signal")
+                stopPlot()
+                return
+            try:
+                datum = json.loads(datum)
+            except:
+                # Save incomplete data
+                tmp = datum
+                continue
+            # Append the recieved data to the lists.
+            appendLists(datum)
+            MathCalculations()
+    except Exception as e:
+        print(e)
+        print("Data error")
+        stopPlot()
+        return
+
+    # Plot the data in the lists.
+    plotData()
 
 
 if online:
@@ -152,7 +165,7 @@ if online:
         sys.exit()
 
     # Start live plotting.
-    livePlot = FuncAnimation(fig, live, interval=10)
+    livePlot = FuncAnimation(fig, live, init_func=initPlot(), interval=10)
 
     # Set plot layout and show plot.
     fig.set_tight_layout(True)
